@@ -1,0 +1,25 @@
+[project]
+name = "generic-ml"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "mkdocs>=1.6.1",
+    "mkdocs-material>=9.6.15",
+    "fastapi>=0.110.0",
+    "uvicorn>=0.24.0",
+    "websockets>=12.0",
+    "pytest>=8.4.1",
+    "httpx>=0.28.1",
+    "matplotlib>=3.10.6",
+    "numpy>=2.2.6",
+    "pandas>=2.3.3",
+    "seaborn>=0.13.2",
+    "jax[cuda13]>=0.6.2",
+    "scikit-learn>=1.7.2",
+    "jaxlib>=0.6.2",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "mkdocs-material", "httpx"]
