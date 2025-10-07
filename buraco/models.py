@@ -95,3 +95,4 @@ class GameState:
     last_discard: Card | None = None
     game_over: bool = False
     scores: Dict[str, int] = field(default_factory=dict)
+    pot_taken_by_team: List[bool] = field(default_factory=lambda: [False, False])

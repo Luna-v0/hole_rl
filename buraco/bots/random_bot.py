@@ -73,25 +73,28 @@ class RandomBot:
         """Finds all possible sequences in the hand."""
         sequences = []
         suits = {}
+        wildcards = []
         for card in hand:
+            if card.rank.value in ["JOKER", "TWO"]:
+                wildcards.append(card)
+                continue
             if card.suit not in suits:
                 suits[card.suit] = []
             suits[card.suit].append(card)
 
         for suit in suits:
             cards_in_suit = suits[suit]
-            if len(cards_in_suit) < 3:
+            if len(cards_in_suit) + len(wildcards) < 3:
                 continue
 
             rank_map = {"A": 1, "2": 2, "3": 3, "4": 4, "5": 5, "6": 6, "7": 7, "8": 8, "9": 9, "10": 10, "J": 11, "Q": 12, "K": 13}
             cards_in_suit.sort(key=lambda c: rank_map.get(c.rank.value, 0))
 
-            for i in range(len(cards_in_suit) - 2):
-                for j in range(i + 1, len(cards_in_suit) - 1):
-                    for k in range(j + 1, len(cards_in_suit)):
-                        meld = [cards_in_suit[i], cards_in_suit[j], cards_in_suit[k]]
-                        if self._is_valid_sequence(meld):
-                            sequences.append(meld)
+            for i in range(len(cards_in_suit) - 1):
+                for j in range(i + 1, len(cards_in_suit)):
+                    meld = cards_in_suit[i:j+1]
+                    if self._is_valid_sequence(meld + wildcards):
+                        sequences.append(meld)
         return sequences
 
     def _can_add_to_meld(self, card: Card, meld: Meld) -> bool:

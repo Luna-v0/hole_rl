@@ -9,7 +9,7 @@ from typing import List
 from buraco.game import GameManager
 from buraco.websockets import ConnectionManager
 from buraco.models import Card
-from requests import (
+from bot_requests import (
     JoinGameRequest,
     AddBotRequest,
     CreateConfiguredGameRequest,

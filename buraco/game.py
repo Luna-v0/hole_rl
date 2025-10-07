@@ -3,7 +3,7 @@
 from typing import Any, Dict, List
 from uuid import UUID
 
-from requests import BotConfig
+from bot_requests import BotConfig
 from .bots.bot_factory import BotFactory
 from .deck import Deck
 from .models import Card, GameState, Meld, Player, TurnPhase
@@ -205,6 +205,13 @@ class GameManager:
         if game.turn_phase != TurnPhase.DRAW:
             raise ValueError("Cannot draw at this phase of the turn.")
 
+        if len(current_player.hand) == 0 and game.pots:
+            current_player.hand.extend(game.pots.pop(0))
+            team_index = game.players.index(current_player) % 2
+            game.pot_taken_by_team[team_index] = True
+            game.turn_phase = TurnPhase.MELD
+            return game
+
         if not game.deck.cards:
             if game.pots:
                 game.deck.cards = game.pots.pop(0)
@@ -252,6 +259,8 @@ class GameManager:
             raise ValueError("Cannot discard at this phase of the turn.")
         if card not in current_player.hand:
             raise ValueError("Card not in player's hand.")
+        if len(current_player.hand) == 1 and card.rank.value in ["JOKER", "TWO"]:
+            raise ValueError("Cannot discard a wildcard to end the game.")
 
         current_player.hand.remove(card)
         game.discard_pile.append(card)
@@ -281,10 +290,16 @@ class GameManager:
         if target_meld_id:
             # Add to existing meld
             target_meld = None
-            for meld in current_player.melds:
-                if meld.meld_id == target_meld_id:
-                    target_meld = meld
-                    break
+            team_index = game.players.index(current_player) % 2
+            for i, player in enumerate(game.players):
+                if i % 2 == team_index:
+                    for meld in player.melds:
+                        if meld.meld_id == target_meld_id:
+                            target_meld = meld
+                            break
+                    if target_meld:
+                        break
+
             if not target_meld:
                 raise ValueError("Target meld not found.")
             target_meld.cards.extend(cards)
@@ -344,21 +359,22 @@ class GameManager:
 
         current_player = self._get_current_player(game)
         if len(current_player.hand) == 0:
-            # Check if the player's team has a buraco
-            team_has_buraco = False
+            # Check if the player's team has a buraco and has taken the pot
             team_index = game.players.index(current_player) % 2
-            for i, player in enumerate(game.players):
-                if i % 2 == team_index:
-                    for meld in player.melds:
-                        if len(meld.cards) >= 7:
-                            team_has_buraco = True
+            if game.pot_taken_by_team[team_index]:
+                team_has_buraco = False
+                for i, player in enumerate(game.players):
+                    if i % 2 == team_index:
+                        for meld in player.melds:
+                            if len(meld.cards) >= 7:
+                                team_has_buraco = True
+                                break
+                        if team_has_buraco:
                             break
-                    if team_has_buraco:
-                        break
-            
-            if team_has_buraco:
-                game.game_over = True
-                self._calculate_scores(game)
+                
+                if team_has_buraco:
+                    game.game_over = True
+                    self._calculate_scores(game)
 
     def _calculate_scores(self, game: GameState):
         """Calculates the scores for each team."""
