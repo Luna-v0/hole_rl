@@ -36,3 +36,18 @@ markdown_extensions:
   - pymdownx.superfences
   - pymdownx.tabbed:
       alternate_style: true
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            show_root_heading: yes
+
+nav:
+  - Home: index.md
+  - API Reference:
+    - Main: main.md
+    - Game: game.md
+    - Models: models.md

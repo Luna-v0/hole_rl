@@ -37,8 +37,8 @@ app.add_middleware(
 
 # In a production app, you would use a more robust singleton pattern
 # or a dependency injection framework to manage these managers.
-game_manager = GameManager()
 ws_manager = ConnectionManager()
+game_manager = GameManager(ws_manager)
 
 
 # --- API Endpoints ---
@@ -106,7 +106,7 @@ def get_game_endpoint(game_id: UUID):
 
 
 @app.post("/games/{game_id}/join", tags=["Game Management"])
-def join_game_endpoint(game_id: UUID, request: JoinGameRequest):
+async def join_game_endpoint(game_id: UUID, request: JoinGameRequest):
     """Adds a player to a game.
 
     Args:
@@ -122,6 +122,11 @@ def join_game_endpoint(game_id: UUID, request: JoinGameRequest):
             status_code=400,
             detail="Could not join game. It might be full or already started.",
         )
+
+    game = game_manager.get_game(game_id)
+    if game:
+        await ws_manager.broadcast_game_state(game)
+
     return player
 
 
@@ -146,7 +151,7 @@ def add_bot_endpoint(game_id: UUID, request: AddBotRequest):
 
 
 @app.post("/games/{game_id}/start", tags=["Game Management"])
-def start_game_endpoint(game_id: UUID):
+async def start_game_endpoint(game_id: UUID):
     """Starts a game that has enough players.
 
     Args:
@@ -163,7 +168,12 @@ def start_game_endpoint(game_id: UUID):
         )
 
     if game.players[0].is_bot:
-        game_manager.play_bot_turn(game_id)
+        try:
+            await game_manager.run_bot_turns(game_id)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+    await ws_manager.broadcast_game_state(game)
 
     return game
 
@@ -207,8 +217,7 @@ async def websocket_endpoint(websocket: WebSocket, game_id: UUID):
                     card = Card(**card_data)
                     game = game_manager.discard_card(game_id, player_id, card)
                     game_manager.next_turn(game)
-                    if game_manager._get_current_player(game).is_bot:
-                        game_manager.play_bot_turn(game_id)
+                    await game_manager.run_bot_turns(game_id)
                 elif action == "meld_cards":
                     player_id = UUID(data.get("player_id"))
                     cards_data = data.get("cards")

@@ -2,8 +2,9 @@
 
 from typing import Any, Dict, List
 from uuid import UUID
+import asyncio
 
-from bot_requests import BotConfig
+from bot_requests import BotPlayer
 from .bots.bot_factory import BotFactory
 from .deck import Deck
 from .models import Card, GameState, Meld, Player, TurnPhase
@@ -16,13 +17,14 @@ class GameManager:
         games (Dict[UUID, GameState]): A dictionary of active games, keyed by game_id.
     """
 
-    def __init__(self):
+    def __init__(self, ws_manager):
         """Initializes the GameManager."""
         self.games: Dict[UUID, GameState] = {}
         self.bots: Dict[UUID, Dict[UUID, Any]] = {}
         self.bot_factory = BotFactory()
+        self.ws_manager = ws_manager
 
-    def create_game(self, human_players: int = 0, bot_players: List[BotConfig] = []) -> GameState:
+    def create_game(self, human_players: int = 0, bot_players: List[BotPlayer] = []) -> GameState:
         """Creates a new, empty game.
 
         Returns:
@@ -101,8 +103,46 @@ class GameManager:
 
 
 
+    def run_bot_turns(self, game_id: UUID):
+        """Continuously plays bot turns until it is a human player's turn or the game is over."""
+        game = self.get_game(game_id)
+        if not game or game.game_over:
+            return
+
+        while game and not game.game_over and self._get_current_player(game).is_bot:
+            self.play_bot_turn(game_id)
+            game = self.get_game(game_id) # Refresh game state
+
+    async def run_bot_turns(self, game_id: UUID):
+        """Continuously plays bot turns until it is a human player's turn or the game is over."""
+        game = self.get_game(game_id)
+        if not game or game.game_over:
+            return
+
+        while True:
+            game = self.get_game(game_id)
+            if not game or game.game_over or not self._get_current_player(game).is_bot:
+                break
+
+            self.play_bot_turn(game.game_id)
+            game = self.get_game(game_id) # Refresh game state
+            if not game or game.game_over:
+                break
+
+            await self.ws_manager.broadcast_game_state(game)
+            await asyncio.sleep(1) # Add a delay to make bot plays visible
+            self.next_turn(game)
+
     def play_bot_turn(self, game_id: UUID):
-        """Plays a single turn for a bot player."""
+        """Plays a single turn for a bot player.
+
+        This method orchestrates a bot's entire turn, including the draw, meld, and discard phases.
+        It retrieves the current game state, gets the appropriate bot instance, and uses the bot's
+        `get_action` method to determine and execute the bot's moves for each phase of the turn.
+
+        Args:
+            game_id: The ID of the game where the bot will play.
+        """
         game = self.get_game(game_id)
         if not game or not game.game_started:
             return
@@ -137,8 +177,6 @@ class GameManager:
         action = bot_instance.get_action(observation)
         if action.get("card"):
             self.discard_card(game_id, player.player_id, action["card"])
-
-        self.next_turn(game)
 
     def _get_observation(self, game_state: GameState, player: Player) -> Dict:
         """Generates the observation for a player."""
@@ -189,7 +227,11 @@ class GameManager:
         return game_state.players[game_state.current_turn_player_index]
 
     def next_turn(self, game_state: GameState):
-        """Advances to the next player's turn."""
+        """Advances to the next player's turn.
+
+        Args:
+            game_state: The current game state.
+        """
         game_state.current_turn_player_index = (game_state.current_turn_player_index + 1) % len(game_state.players)
         game_state.turn_phase = TurnPhase.DRAW
 
@@ -284,8 +326,8 @@ class GameManager:
         if not all(c in current_player.hand for c in cards):
             raise ValueError("One or more cards not in player's hand.")
 
-        if not self._is_valid_sequence(cards):
-            raise ValueError("Invalid meld. Only sequences are allowed.")
+        if not self._is_valid_meld(cards):
+            raise ValueError("Invalid meld. Melds must be a sequence or a set.")
 
         if target_meld_id:
             # Add to existing meld
@@ -315,8 +357,8 @@ class GameManager:
         game.turn_phase = TurnPhase.DISCARD
         return game
 
-    def _is_valid_sequence(self, cards: List[Card]) -> bool:
-        """Checks if a list of cards is a valid sequence."""
+    def _is_valid_meld(self, cards: List[Card]) -> bool:
+        """Checks if a list of cards is a valid meld (sequence or set)."""
         if len(cards) < 3:
             return False
 
@@ -324,31 +366,50 @@ class GameManager:
         if not non_wild_cards:
             return False  # a meld must have at least one natural card
 
-        suit = non_wild_cards[0].suit
-        if not all(card.suit == suit or card.rank.value in ["JOKER", "TWO"] for card in non_wild_cards):
+        # Check for a set (same rank)
+        first_rank = non_wild_cards[0].rank
+        if all(c.rank == first_rank for c in non_wild_cards):
+            suits = [c.suit for c in non_wild_cards]
+            return len(suits) == len(set(suits))  # Check for duplicate suits
+
+        # Check for a sequence (run)
+        first_suit = non_wild_cards[0].suit
+        if not all(c.suit == first_suit for c in non_wild_cards):
             return False
 
         # Sort cards by rank
         rank_map = {"A": 1, "2": 2, "3": 3, "4": 4, "5": 5, "6": 6, "7": 7, "8": 8, "9": 9, "10": 10, "J": 11, "Q": 12, "K": 13}
-        cards.sort(key=lambda c: rank_map.get(c.rank.value, 0))
+        
+        sorted_cards = sorted(cards, key=lambda c: rank_map.get(c.rank.value, 0) if c.rank.value not in ["JOKER", "TWO"] else 0)
 
-        for i in range(len(cards) - 1):
-            rank1 = cards[i].rank.value
-            rank2 = cards[i+1].rank.value
+        wildcard_count = len(cards) - len(non_wild_cards)
 
-            if rank1 == "JOKER" or rank1 == "TWO":
-                continue
+        # Find the ranks of natural cards
+        natural_ranks = sorted([rank_map[c.rank.value] for c in non_wild_cards])
 
-            if rank2 == "JOKER" or rank2 == "TWO":
-                continue
+        # Handle Ace-high (A,K,Q) and Ace-low (A,2,3) sequences
+        is_ace_low = 1 in natural_ranks
+        is_ace_high = 1 in natural_ranks and 13 in natural_ranks
 
-            if rank_map[rank2] - rank_map[rank1] != 1:
-                # Handle Ace at the end
-                if rank1 == "A" and rank2 == "K":
-                    continue
-                return False
+        if is_ace_high:
+            # Check if it could be A, K, Q ...
+            # To handle this, we can temporarily treat Ace as rank 14
+            if natural_ranks[0] == 1 and natural_ranks[-1] == 13:
+                # check if it is a valid sequence with ace as 1
+                gaps = 0
+                for i in range(len(natural_ranks) - 1):
+                    gaps += natural_ranks[i+1] - natural_ranks[i] - 1
+                if gaps > wildcard_count:
+                    # if not, check with ace as 14
+                    natural_ranks.remove(1)
+                    natural_ranks.append(14)
+                    natural_ranks.sort()
 
-        return True
+        gaps = 0
+        for i in range(len(natural_ranks) - 1):
+            gaps += natural_ranks[i+1] - natural_ranks[i] - 1
+            
+        return gaps <= wildcard_count
 
     def _check_game_over(self, game: GameState):
         """Checks if the game is over and calculates the scores."""

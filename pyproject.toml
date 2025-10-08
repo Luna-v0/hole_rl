@@ -22,4 +22,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "mkdocs-material", "httpx"]
+dev = ["pytest", "mkdocs-material", "httpx", "mkdocstrings", "mkdocstrings-python"]
+
+[tool.setuptools.packages.find]
+include = ["buraco*"]

@@ -1,80 +1,48 @@
-# Generic ML
+# Backend
 
-This is a generic machine learning repository that can be used as a template for your own projects.
+This directory contains the backend for the Buraco card game.
 
-## How to use this template
+## Prerequisites
 
-1.  **Clone this repository:**
+Before you begin, ensure you have the following installed:
 
-    ```bash
-    git clone https://github.com/el-tocino/generic-ml <your-project-name>
-    ```
+*   [Python 3.10+](https://www.python.org/downloads/)
+*   [uv](https://github.com/astral-sh/uv)
 
-2.  **Rename the package:**
+## Installation
 
-    Rename the `generic_ml` directory to the name of your project's package.
-
-3.  **Update `pyproject.toml`:**
-
-    Change the `name` in `pyproject.toml` to match your project's name.
-
-4.  **Update `mkdocs.yml`:**
-
-    Update the `site_name`, `site_url`, `repo_name`, and `repo_url` to match your project's information.
-
-## Getting Started
-
-1.  **Create and activate the virtual environment:**
+1.  **Create a virtual environment:**
 
     ```bash
     uv venv
+    ```
+
+2.  **Activate the virtual environment:**
+
+    ```bash
     source .venv/bin/activate
     ```
 
-2.  **Install dependencies:**
+3.  **Install the dependencies:**
 
     ```bash
-    uv sync
+    uv pip install -r requirements.txt
     ```
 
-## Running the main file
+## Running the Application
 
-To run the `main.py` file, you can use `uv run`:
+To run the FastAPI application, use the following command:
 
 ```bash
-uv run generic_ml/main.py
+uvicorn main:app --reload
 ```
 
-## Using the package
+The application will be available at `http://localhost:8000`.
 
-To use the package in your own code, you can import it like this:
+## Running Tests
 
-```python
-import generic_ml
-
-# Your code here
-```
-
-## Testing
-
-This project uses `pytest` for testing. To run the tests, use `uv run`:
+To run the tests, use the following command:
 
 ```bash
 uv run pytest
-```
-
-## Documentation
-
-This project uses `mkdocs` for documentation. To build and serve the documentation locally, run:
-
-```bash
-uv run mkdocs serve
-```
-
-This command will start a local server and automatically rebuild the documentation when you make changes.
-
-To build the static documentation site, run:
-
-```bash
-uv run mkdocs build
 ```

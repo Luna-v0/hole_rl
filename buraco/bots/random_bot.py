@@ -93,16 +93,16 @@ class RandomBot:
             for i in range(len(cards_in_suit) - 1):
                 for j in range(i + 1, len(cards_in_suit)):
                     meld = cards_in_suit[i:j+1]
-                    if self._is_valid_sequence(meld + wildcards):
+                    if self._is_valid_meld(meld + wildcards):
                         sequences.append(meld)
         return sequences
 
     def _can_add_to_meld(self, card: Card, meld: Meld) -> bool:
         """Checks if a card can be added to a meld."""
-        return self._is_valid_sequence(meld.cards + [card])
+        return self._is_valid_meld(meld.cards + [card])
 
-    def _is_valid_sequence(self, cards: List[Card]) -> bool:
-        """Checks if a list of cards is a valid sequence."""
+    def _is_valid_meld(self, cards: List[Card]) -> bool:
+        """Checks if a list of cards is a valid meld (sequence or set)."""
         if len(cards) < 3:
             return False
 
@@ -110,31 +110,50 @@ class RandomBot:
         if not non_wild_cards:
             return False  # a meld must have at least one natural card
 
-        suit = non_wild_cards[0].suit
-        if not all(card.suit == suit or card.rank.value in ["JOKER", "TWO"] for card in non_wild_cards):
+        # Check for a set (same rank)
+        first_rank = non_wild_cards[0].rank
+        if all(c.rank == first_rank for c in non_wild_cards):
+            suits = [c.suit for c in non_wild_cards]
+            return len(suits) == len(set(suits))  # Check for duplicate suits
+
+        # Check for a sequence (run)
+        first_suit = non_wild_cards[0].suit
+        if not all(c.suit == first_suit for c in non_wild_cards):
             return False
 
         # Sort cards by rank
         rank_map = {"A": 1, "2": 2, "3": 3, "4": 4, "5": 5, "6": 6, "7": 7, "8": 8, "9": 9, "10": 10, "J": 11, "Q": 12, "K": 13}
-        cards.sort(key=lambda c: rank_map.get(c.rank.value, 0))
+        
+        sorted_cards = sorted(cards, key=lambda c: rank_map.get(c.rank.value, 0) if c.rank.value not in ["JOKER", "TWO"] else 0)
 
-        for i in range(len(cards) - 1):
-            rank1 = cards[i].rank.value
-            rank2 = cards[i+1].rank.value
+        wildcard_count = len(cards) - len(non_wild_cards)
 
-            if rank1 == "JOKER" or rank1 == "TWO":
-                continue
+        # Find the ranks of natural cards
+        natural_ranks = sorted([rank_map[c.rank.value] for c in non_wild_cards])
 
-            if rank2 == "JOKER" or rank2 == "TWO":
-                continue
+        # Handle Ace-high (A,K,Q) and Ace-low (A,2,3) sequences
+        is_ace_low = 1 in natural_ranks
+        is_ace_high = 1 in natural_ranks and 13 in natural_ranks
 
-            if rank_map[rank2] - rank_map[rank1] != 1:
-                # Handle Ace at the end
-                if rank1 == "A" and rank2 == "K":
-                    continue
-                return False
+        if is_ace_high:
+            # Check if it could be A, K, Q ...
+            # To handle this, we can temporarily treat Ace as rank 14
+            if natural_ranks[0] == 1 and natural_ranks[-1] == 13:
+                # check if it is a valid sequence with ace as 1
+                gaps = 0
+                for i in range(len(natural_ranks) - 1):
+                    gaps += natural_ranks[i+1] - natural_ranks[i] - 1
+                if gaps > wildcard_count:
+                    # if not, check with ace as 14
+                    natural_ranks.remove(1)
+                    natural_ranks.append(14)
+                    natural_ranks.sort()
 
-        return True
+        gaps = 0
+        for i in range(len(natural_ranks) - 1):
+            gaps += natural_ranks[i+1] - natural_ranks[i] - 1
+            
+        return gaps <= wildcard_count
 
     def _discard_phase(self, observation: Dict[str, Any]) -> Dict[str, Any]:
         """Determines the action for the discard phase."""

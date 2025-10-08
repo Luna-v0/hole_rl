@@ -7,9 +7,14 @@ class JoinGameRequest(BaseModel):
 class AddBotRequest(BaseModel):
     bot_name: str
 
+class BotPlayer(BaseModel):
+    name: str
+    algorithm: str
+
+
 class CreateConfiguredGameRequest(BaseModel):
     human_players: int
-    bot_players: int
+    bot_players: List[BotPlayer]
 
 class CreateBotGameRequest(BaseModel):
     bot_players: int
