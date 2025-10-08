@@ -69,7 +69,7 @@ def create_configured_game_endpoint(request: CreateConfiguredGameRequest):
 
 
 @app.post("/games/create_and_start_bot_game", tags=["Game Management"])
-def create_and_start_bot_game_endpoint(request: CreateBotGameRequest):
+async def create_and_start_bot_game_endpoint(request: CreateBotGameRequest):
     """Creates and starts a new Buraco game with only bots.
 
     Returns:
@@ -77,6 +77,8 @@ def create_and_start_bot_game_endpoint(request: CreateBotGameRequest):
     """
     # Create bot player configs
     from bot_requests import BotPlayer
+    import asyncio
+
     bot_players = [
         BotPlayer(name=f"Bot {i+1}", algorithm="random")
         for i in range(request.bot_players)
@@ -92,8 +94,9 @@ def create_and_start_bot_game_endpoint(request: CreateBotGameRequest):
             detail="Could not start game. Ensure 2 or 4 players have joined and it's not already started.",
         )
 
+    # Start bot turns in the background (don't await - let them run continuously)
     if game.players[0].is_bot:
-        game_manager.play_bot_turn(game.game_id)
+        asyncio.create_task(game_manager.run_bot_turns(game.game_id))
 
     return game_manager.get_game(game.game_id)
 
