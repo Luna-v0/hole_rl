@@ -1,6 +1,7 @@
 """Tests for the game logic."""
 
 import unittest
+from unittest.mock import Mock
 from uuid import uuid4
 
 from buraco.game import GameManager
@@ -11,7 +12,9 @@ class TestGame(unittest.TestCase):
 
     def setUp(self):
         """Set up for the tests."""
-        self.game_manager = GameManager()
+        # Create a mock WebSocket manager
+        mock_ws_manager = Mock()
+        self.game_manager = GameManager(mock_ws_manager)
 
     def test_create_game(self):
         """Test that a game can be created."""

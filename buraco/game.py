@@ -126,10 +126,12 @@ class GameManager:
 
             self.play_bot_turn(game.game_id)
             game = self.get_game(game_id) # Refresh game state
+
+            await self.ws_manager.broadcast_game_state(game)
+
             if not game or game.game_over:
                 break
 
-            await self.ws_manager.broadcast_game_state(game)
             await asyncio.sleep(1) # Add a delay to make bot plays visible
             self.next_turn(game)
 
@@ -152,31 +154,55 @@ class GameManager:
             return
 
         bot_instance = self.bots[game_id][player.player_id]
+        print(f"--- Playing turn for bot: {player.name} ---")
 
-        # Draw Phase
-        game.turn_phase = TurnPhase.DRAW
-        observation = self._get_observation(game, player)
-        action = bot_instance.get_action(observation)
-        if action.get("choice") == "PICK_DISCARD":
-            self.take_discard_pile(game_id, player.player_id)
-        else:
-            self.draw_card_from_deck(game_id, player.player_id)
+        try:
+            # Draw Phase
+            print("--- Draw Phase ---")
+            game.turn_phase = TurnPhase.DRAW
+            observation = self._get_observation(game, player)
+            print(f"Observation: {observation}")
+            action = bot_instance.get_action(observation)
+            print(f"Action: {action}")
+            if action.get("choice") == "PICK_DISCARD":
+                self.take_discard_pile(game_id, player.player_id)
+            else:
+                self.draw_card_from_deck(game_id, player.player_id)
+            print(f"Hand after draw: {player.hand}")
+        except ValueError as e:
+            raise ValueError(f"Error in draw phase: {e}")
 
-        # Meld Phase
-        game.turn_phase = TurnPhase.MELD
-        observation = self._get_observation(game, player)
-        action = bot_instance.get_action(observation)
-        if action.get("ops"):
-            for op in action["ops"]:
-                if op.get("meld_cards"):
-                    game = self.meld_cards(game_id, player.player_id, op["meld_cards"])
+        try:
+            # Meld Phase
+            print("--- Meld Phase ---")
+            game.turn_phase = TurnPhase.MELD
+            observation = self._get_observation(game, player)
+            print(f"Observation: {observation}")
+            action = bot_instance.get_action(observation)
+            print(f"Action: {action}")
+            if action.get("ops"):
+                for op in action["ops"]:
+                    if op.get("meld_cards"):
+                        print(f"Attempting to meld: {op.get('meld_cards')}")
+                        game = self.meld_cards(game_id, player.player_id, op["meld_cards"])
+            print(f"Hand after meld: {player.hand}")
+            print(f"Player melds: {player.melds}")
+        except ValueError as e:
+            raise ValueError(f"Error in meld phase: {e}")
 
-        # Discard Phase
-        game.turn_phase = TurnPhase.DISCARD
-        observation = self._get_observation(game, player)
-        action = bot_instance.get_action(observation)
-        if action.get("card"):
-            self.discard_card(game_id, player.player_id, action["card"])
+        try:
+            # Discard Phase
+            print("--- Discard Phase ---")
+            game.turn_phase = TurnPhase.DISCARD
+            observation = self._get_observation(game, player)
+            print(f"Observation: {observation}")
+            action = bot_instance.get_action(observation)
+            print(f"Action: {action}")
+            if action.get("card"):
+                game = self.discard_card(game_id, player.player_id, action["card"])
+            print(f"Hand after discard: {player.hand}")
+        except ValueError as e:
+            raise ValueError(f"Error in discard phase: {e}")
 
     def _get_observation(self, game_state: GameState, player: Player) -> Dict:
         """Generates the observation for a player."""
@@ -247,18 +273,14 @@ class GameManager:
         if game.turn_phase != TurnPhase.DRAW:
             raise ValueError("Cannot draw at this phase of the turn.")
 
-        if len(current_player.hand) == 0 and game.pots:
-            current_player.hand.extend(game.pots.pop(0))
-            team_index = game.players.index(current_player) % 2
-            game.pot_taken_by_team[team_index] = True
-            game.turn_phase = TurnPhase.MELD
-            return game
-
+        # Check if deck is empty
         if not game.deck.cards:
             if game.pots:
+                # Use a pot as the new deck
                 game.deck.cards = game.pots.pop(0)
                 game.deck.shuffle()
             else:
+                # No cards left, game ends
                 game.game_over = True
                 self._calculate_scores(game)
                 return game
@@ -289,7 +311,11 @@ class GameManager:
         return game
 
     def discard_card(self, game_id: UUID, player_id: UUID, card: Card) -> GameState:
-        """Player discards a card to end their turn."""
+        """Player discards a card to end their turn.
+
+        According to rules: When a player runs out of cards by discarding their last card,
+        they take one of the pots.
+        """
         game = self.get_game(game_id)
         if not game:
             raise ValueError("Game not found.")
@@ -307,6 +333,15 @@ class GameManager:
         current_player.hand.remove(card)
         game.discard_pile.append(card)
         game.last_discard = card
+
+        # If player's hand is now empty and they haven't taken a pot yet, take one
+        if len(current_player.hand) == 0 and game.pots:
+            team_index = game.players.index(current_player) % 2
+            if not game.pot_taken_by_team[team_index]:
+                current_player.hand.extend(game.pots.pop(0))
+                game.pot_taken_by_team[team_index] = True
+                print(f"{current_player.name}'s team took a pot!")
+
         self._check_game_over(game)
         return game
 
@@ -327,7 +362,7 @@ class GameManager:
             raise ValueError("One or more cards not in player's hand.")
 
         if not self._is_valid_meld(cards):
-            raise ValueError("Invalid meld. Melds must be a sequence or a set.")
+            raise ValueError("Invalid meld. Melds must be sequences (same suit, consecutive ranks).")
 
         if target_meld_id:
             # Add to existing meld
@@ -358,7 +393,11 @@ class GameManager:
         return game
 
     def _is_valid_meld(self, cards: List[Card]) -> bool:
-        """Checks if a list of cards is a valid meld (sequence or set)."""
+        """Checks if a list of cards is a valid meld (sequence only, no sets).
+
+        According to the rules: Melds are combinations of three or more cards
+        of the same suit in sequential order.
+        """
         if len(cards) < 3:
             return False
 
@@ -366,13 +405,7 @@ class GameManager:
         if not non_wild_cards:
             return False  # a meld must have at least one natural card
 
-        # Check for a set (same rank)
-        first_rank = non_wild_cards[0].rank
-        if all(c.rank == first_rank for c in non_wild_cards):
-            suits = [c.suit for c in non_wild_cards]
-            return len(suits) == len(set(suits))  # Check for duplicate suits
-
-        # Check for a sequence (run)
+        # Check that all non-wild cards are the same suit (required for sequences)
         first_suit = non_wild_cards[0].suit
         if not all(c.suit == first_suit for c in non_wild_cards):
             return False

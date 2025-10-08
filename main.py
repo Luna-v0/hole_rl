@@ -25,6 +25,8 @@ app = FastAPI(
 # CORS Middleware
 origins = [
     "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://0.0.0.0:5173",
 ]
 
 app.add_middleware(
@@ -73,8 +75,15 @@ def create_and_start_bot_game_endpoint(request: CreateBotGameRequest):
     Returns:
         The initial state of the newly created game.
     """
+    # Create bot player configs
+    from bot_requests import BotPlayer
+    bot_players = [
+        BotPlayer(name=f"Bot {i+1}", algorithm="random")
+        for i in range(request.bot_players)
+    ]
+
     game = game_manager.create_game(
-        human_players=0, bot_players=request.bot_players
+        human_players=0, bot_players=bot_players
     )
     game = game_manager.start_game(game.game_id)
     if not game:
@@ -160,20 +169,44 @@ async def start_game_endpoint(game_id: UUID):
     Returns:
         The state of the game after starting.
     """
+    print(f"\n{'='*60}")
+    print(f"[START ENDPOINT] Request to start game: {game_id}")
+
+    # Get current game state for debugging
+    existing_game = game_manager.get_game(game_id)
+    if existing_game:
+        print(f"[START ENDPOINT] Current game state:")
+        print(f"  - game_started: {existing_game.game_started}")
+        print(f"  - players: {len(existing_game.players)}")
+        print(f"  - game_over: {existing_game.game_over}")
+    else:
+        print(f"[START ENDPOINT] ❌ Game not found!")
+
     game = game_manager.start_game(game_id)
+
     if not game:
+        print(f"[START ENDPOINT] ❌ Failed to start game")
+        print(f"{'='*60}\n")
         raise HTTPException(
             status_code=400,
             detail="Could not start game. Ensure 2 players have joined and it's not already started.",
         )
 
+    print(f"[START ENDPOINT] ✓ Game started successfully")
+    print(f"  - Players: {[p.name for p in game.players]}")
+
     if game.players[0].is_bot:
+        print(f"[START ENDPOINT] First player is bot, running bot turns...")
         try:
             await game_manager.run_bot_turns(game_id)
         except ValueError as e:
+            print(f"[START ENDPOINT] ❌ Bot turn error: {e}")
+            print(f"{'='*60}\n")
             raise HTTPException(status_code=400, detail=str(e))
 
     await ws_manager.broadcast_game_state(game)
+    print(f"[START ENDPOINT] ✓ Complete - game state broadcasted")
+    print(f"{'='*60}\n")
 
     return game
 
@@ -216,8 +249,9 @@ async def websocket_endpoint(websocket: WebSocket, game_id: UUID):
                     card_data = data.get("card")
                     card = Card(**card_data)
                     game = game_manager.discard_card(game_id, player_id, card)
-                    game_manager.next_turn(game)
-                    await game_manager.run_bot_turns(game_id)
+                    if not game.game_over:
+                        game_manager.next_turn(game)
+                        await game_manager.run_bot_turns(game_id)
                 elif action == "meld_cards":
                     player_id = UUID(data.get("player_id"))
                     cards_data = data.get("cards")
